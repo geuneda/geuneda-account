@@ -6,11 +6,11 @@
 |------|------|-------------|
 | 인증 | `IAuthService`, `AuthService`, `AuthServiceOptions`, `SignInResult`, `SignOutReason` | `Geuneda.Account` |
 | 연동 | `LinkResult`, `LinkedPlatform` | `Geuneda.Account` |
-| 제공자 | `IAuthProvider`, `PlatformCredential`, `GuestAuthProvider`, `AccountPlatforms` | `Geuneda.Account` |
+| 제공자 | `IAuthProvider`, `PlatformCredential`, `GuestAuthProvider`, `AccountPlatforms`(애플·구글 제공자는 별도 패키지 `com.geuneda.account.apple`·`google`) | `Geuneda.Account` |
 | 게임 서버 요청 | `AuthTokenMiddleware`(http 미들웨어) | `Geuneda.Account` |
 | 세션 | `IAppSession`, `AppSession`, `SessionInfo`, `SessionEndReason` | `Geuneda.Account` |
 | 코드 | `AccountResultCodes`(3000 블록) | `Geuneda.Account` |
-| 서버(.NET, `Server~/`) | `AddGeunedaAccount`, `MapGeunedaAccount`, `IAccountStore`, `IRefreshTokenStore`, `IPlatformVerifier`, `IAccessTokenValidator`, `AddGeunedaAccessTokenValidation` | `Geuneda.Account.Server` |
+| 서버(.NET, `Server~/`) | `AddGeunedaAccount`, `MapGeunedaAccount`, `IAccountStore`, `IRefreshTokenStore`, `IPlatformVerifier`(`AddGuest`, `AddApple`, `AddGoogle`), `IAccessTokenValidator`, `AddGeunedaAccessTokenValidation` | `Geuneda.Account.Server` |
 
 ## 설치
 
@@ -187,6 +187,7 @@ app.MapGeunedaAccount("/auth");   // 클라이언트 기본 주소는 https://..
 - **access 토큰**: JWT(`sub` 계정 ID, `sid` 세션 ID, `jti`, `iss`, `aud`, `exp`). 기본 수명 1시간. 게임 서버는 `AddGeunedaAccessTokenValidation(o => { o.Issuer, o.Audience, o.SigningKeys })` 로 `IAccessTokenValidator` 를 받아 검증합니다(실시간 RPC 로그인에서는 계약 구현이 검증 후 `IRpcContext.SignIn(accountId)`). 토큰 자체만 검증하므로 탈퇴한 계정의 토큰도 만료 전까지 통과합니다.
 - **refresh 토큰**: 32바이트 무작위 값이고 서버는 SHA-256 만 저장합니다. 쓸 때마다 새 토큰으로 바뀌고 수명(기본 30일)도 새로 셉니다. 로그인 하나에서 쓸 수 있는 토큰은 언제나 하나(현재 토큰)입니다. 바로 직전 토큰이 `RefreshReuseGrace`(기본 30초, 처음 교체 시각부터) 안에 다시 오면 응답을 잃은 재시도로 보고 현재 토큰을 새 토큰으로 바꿔 줍니다. 그 밖에 지나간 토큰이 오면(유예 뒤 직전 토큰, 두 번 이상 전 토큰, 재시도로 밀려난 토큰) 탈취로 보고 그 로그인을 폐기합니다(`RefreshTokenReused`).
 - **검증기**: `IPlatformVerifier`(플랫폼 이름, 자격 → 플랫폼 안의 고유 ID). 게스트(`AddGuest`)는 Base64url 32~64바이트 비밀 값의 SHA-256 을 고유 ID 로 씁니다.
+- **애플·구글**: `AddApple(o => o.Audiences.Add("com.company.game"))`(iOS 번들 ID), `AddGoogle(o => { o.ClientIds.Add(웹 클라이언트 ID); o.ClientIds.Add(iOS 클라이언트 ID); })`. 자격은 id 토큰(JWT)이고 발급자 공개 키(OIDC JWKS)로 서명, 발급자, 대상, 만료(기본 시계 오차 5분)를 검사해 `sub` 를 고유 ID 로 씁니다. 공개 키(`OpenIdConnectKeyCache`)는 처음 검증할 때 받아 두고 12시간마다 갱신합니다(실패하면 받아 둔 키를 계속 쓰고 5분 뒤 다시 시도). 모르는 키로 서명된 토큰이 오면 다시 받기를 기다려 한 번 더 확인하므로 발급자의 키 교체 직후에도 첫 요청이 통과합니다. 위조 토큰으로 발급자를 두드리지 않게 다시 받기는 5분에 한 번입니다. 서명 키가 없는 응답은 받기 실패로 보고, 처음 받기가 실패하면 30초 동안은 다시 받지 않고 바로 500 입니다. 공개 키를 확인하지 못하면 500(클라이언트에서는 `HttpError`, 로그인 유지)입니다. 클라이언트 제공자는 [com.geuneda.account.apple](https://github.com/geuneda/geuneda-account-apple), [com.geuneda.account.google](https://github.com/geuneda/geuneda-account-google) 입니다.
 - **저장소**: `IAccountStore`(로그인 수단의 고유성, 플랫폼당 하나, 마지막 수단 보호를 원자적으로), `IRefreshTokenStore`(로그인별 `RefreshTokenFamily` 의 현재·직전 토큰과 토큰 기록 `RefreshTokenRecord`. 회전 `TryRotateAsync` 는 현재 토큰을 비교한 뒤 상태 교체와 새 토큰 기록 추가를 한 번에). 메모리 구현(`AddInMemoryStores`)은 샘플·테스트용입니다. 저장소는 scoped 로 등록해도 됩니다.
 - 시작할 때(`MapGeunedaAccount`) 설정(키로 서명 가능한지 포함), 저장소 등록, 검증기 이름 중복을 검사해 잘못되면 예외입니다.
 - 요청 횟수 제한은 하지 않습니다. 운영에서는 ASP.NET Core rate limiter 를 이 그룹에 붙입니다. 로그에는 토큰·자격 원문을 남기지 않습니다.
@@ -196,7 +197,7 @@ app.MapGeunedaAccount("/auth");   // 클라이언트 기본 주소는 https://..
 
 - Unity 2021.3 이상
 - `com.geuneda.core` 0.2.0, `com.geuneda.http` 0.1.0, `com.cysharp.unitask` 2.5.10, `com.unity.nuget.newtonsoft-json` 3.2.1
-- 서버: .NET 10(ASP.NET Core), Microsoft.IdentityModel.JsonWebTokens 8.22
+- 서버: .NET 10(ASP.NET Core), Microsoft.IdentityModel.JsonWebTokens·Protocols.OpenIdConnect 8.22
 
 변경 이력은 [CHANGELOG.md](CHANGELOG.md) 를 참고하세요.
 

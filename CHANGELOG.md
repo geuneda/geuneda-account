@@ -4,6 +4,12 @@
 이 형식은 [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)를 기반으로 하며,
 이 프로젝트는 [Semantic Versioning](http://semver.org/spec/v2.0.0.html)을 따릅니다.
 
+## [0.2.0] - 2026-10-14
+
+**New**:
+- 서버 `AddApple(options => options.Audiences...)`, `AddGoogle(options => options.ClientIds...)`: 애플·구글 id 토큰 검증기(`AppleIdTokenVerifier`, `GoogleIdTokenVerifier`, 공통 `OpenIdConnectPlatformVerifier`). 공개 키 캐시 `OpenIdConnectKeyCache`(OIDC JWKS 를 받아 두고 12시간마다 갱신, 모르는 키면 다시 받기를 기다려 한 번 더 검증, 재요청은 5분에 한 번, 동시 요청은 한 번만 받음, 서명 키 없는 응답은 실패, 처음 받기 실패 뒤 30초 백오프, 확인하지 못하면 500), 발급자·대상·만료 검사, `sub` 를 고유 ID 로. 대상이 없거나 시계 오차가 음수면 시작할 때 예외
+- 클라이언트 제공자는 별도 패키지 `com.geuneda.account.apple`, `com.geuneda.account.google`
+
 ## [0.1.0] - 2026-10-14
 
 **New**:
