@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/Geuneda.Account.SampleServer/Geuneda.Account.SampleServer.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Geuneda.Account.Server/Geuneda.Account.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Geuneda.Account.Server.Tests/Geuneda.Account.Server.Tests.csproj" />
+  </Folder>
+</Solution>

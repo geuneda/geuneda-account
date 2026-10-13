@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- 메모리 저장소와 게스트 로그인을 쓰는 샘플 인증 서버. Unity 상호 운용 테스트(Tests/EditMode/Interop)가 이 서버에 붙는다 -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Geuneda.Account.SampleServer</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Geuneda.Account.Server/Geuneda.Account.Server.csproj" />
+  </ItemGroup>
+</Project>
