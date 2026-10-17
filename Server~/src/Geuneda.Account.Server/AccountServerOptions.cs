@@ -35,6 +35,15 @@ namespace Geuneda.Account.Server
 		/// <summary>access 토큰을 검증할 때 허용하는 시계 오차입니다. 기본 1분입니다.</summary>
 		public TimeSpan ClockSkew { get; set; } = TimeSpan.FromMinutes(1);
 
+		/// <summary>
+		/// 애플·구글 로그인 nonce(<c>POST nonce</c>)의 유효 시간입니다. 발급부터 이 시간 안에 플랫폼 로그인을 마치고 로그인·연동 요청을 보내야 합니다.
+		/// 연동 충돌 티켓도 발급부터 이 시간 동안만 씁니다. 0 보다 크고 <see cref="MaxNonceLifetime"/>(5분) 이하여야 하고, 기본 5분입니다.
+		/// </summary>
+		public TimeSpan NonceLifetime { get; set; } = MaxNonceLifetime;
+
+		/// <summary><see cref="NonceLifetime"/> 의 상한입니다. 1회용 값이 오래 살아 있으면 새어 나갔을 때 쓸 수 있는 시간이 길어집니다.</summary>
+		public static readonly TimeSpan MaxNonceLifetime = TimeSpan.FromMinutes(5);
+
 		/// <exception cref="InvalidOperationException">필수 값이 없거나 범위를 벗어났거나, 키로 토큰에 서명할 수 없는 경우</exception>
 		internal void Validate()
 		{
@@ -66,6 +75,11 @@ namespace Geuneda.Account.Server
 			if (ClockSkew < TimeSpan.Zero)
 			{
 				throw new InvalidOperationException("AccountServerOptions.ClockSkew must not be negative");
+			}
+
+			if (NonceLifetime <= TimeSpan.Zero || NonceLifetime > MaxNonceLifetime)
+			{
+				throw new InvalidOperationException("AccountServerOptions.NonceLifetime must be greater than zero and at most 5 minutes");
 			}
 
 			try

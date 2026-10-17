@@ -37,7 +37,10 @@ namespace Geuneda.Account
 
 		public string Platform => AccountPlatforms.Guest;
 
-		public UniTask<Result<PlatformCredential>> SignInAsync(CancellationToken cancellationToken)
+		/// <summary>비밀 값은 이 기기에서만 만들고 보내므로 nonce 를 쓰지 않습니다.</summary>
+		public bool RequiresNonce => false;
+
+		public UniTask<Result<PlatformCredential>> SignInAsync(string nonce, CancellationToken cancellationToken)
 		{
 			if (cancellationToken.IsCancellationRequested)
 			{

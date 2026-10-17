@@ -10,6 +10,7 @@ namespace Geuneda.Account
 {
 	/// <summary>
 	/// 계정 인증입니다. 기본 구현은 <see cref="AuthService"/> 이고, services 의 <c>MainInstaller</c> 에 이 인터페이스로 바인딩합니다. 메인 스레드에서 씁니다.
+	/// 정리는 <c>MainInstaller.CleanDispose&lt;IAuthService&gt;()</c> 로 합니다(<see cref="IDisposable.Dispose"/>: 진행 중인 요청 취소, 저장된 로그인은 둠).
 	/// </summary>
 	/// <remarks>
 	/// <para>
@@ -20,7 +21,7 @@ namespace Geuneda.Account
 	/// access 토큰 재발급은 동시에 여러 곳에서 불러도 한 번만 서버에 보내고 결과를 함께 받습니다.
 	/// </para>
 	/// </remarks>
-	public interface IAuthService
+	public interface IAuthService : IDisposable
 	{
 		/// <summary>이번 실행에서 로그인(또는 자동 로그인)에 성공했고 아직 로그아웃하지 않았는지</summary>
 		bool IsSignedIn { get; }
@@ -37,11 +38,14 @@ namespace Geuneda.Account
 		/// <summary>로그인 상태가 끝났습니다. 타이틀 화면으로 돌아가는 등의 처리를 합니다.</summary>
 		event Action<SignOutReason> SignedOut;
 
-		/// <summary>플랫폼으로 로그인합니다. 처음인 플랫폼 계정이면 새 계정을 만듭니다. 이미 로그인 중이면 이 계정으로 바꿉니다.</summary>
+		/// <summary>
+		/// 플랫폼으로 로그인합니다. 처음인 플랫폼 계정이면 새 계정을 만듭니다. 이미 로그인 중이면 이 계정으로 바꿉니다.
+		/// nonce 를 쓰는 제공자(애플·구글)는 먼저 인증 서버에서 nonce 를 받고, 받지 못하면 플랫폼 로그인 없이 그 결과 코드(네트워크 실패 등)로 끝납니다.
+		/// </summary>
 		/// <exception cref="ArgumentException"><paramref name="platform"/> 제공자를 등록하지 않은 경우</exception>
 		UniTask<Result<SignInResult>> SignInAsync(string platform, CancellationToken cancellationToken = default);
 
-		/// <summary>이미 받은 자격으로 로그인합니다(연동 충돌에서 그 계정으로 들어갈 때).</summary>
+		/// <summary>이미 받은 자격으로 로그인합니다(연동 충돌에서 그 계정으로 들어갈 때). 충돌 자격이면 안의 1회용 티켓을 보내고, 서버는 한 번만 받습니다.</summary>
 		UniTask<Result<SignInResult>> SignInAsync(PlatformCredential credential, CancellationToken cancellationToken = default);
 
 		/// <summary>
@@ -63,11 +67,17 @@ namespace Geuneda.Account
 
 		UniTask<Result<IReadOnlyList<LinkedPlatform>>> GetLinksAsync(CancellationToken cancellationToken = default);
 
-		/// <summary>플랫폼 로그인을 해서 이 계정에 연동합니다. 다른 계정에 연동된 플랫폼 계정이면 <see cref="LinkResult.IsConflict"/> 입니다.</summary>
+		/// <summary>
+		/// 플랫폼 로그인을 해서 이 계정에 연동합니다. 다른 계정에 연동된 플랫폼 계정이면 <see cref="LinkResult.IsConflict"/> 입니다.
+		/// nonce 를 쓰는 제공자는 <see cref="SignInAsync(string, CancellationToken)"/> 처럼 먼저 nonce 를 받습니다.
+		/// </summary>
 		/// <exception cref="ArgumentException"><paramref name="platform"/> 제공자를 등록하지 않은 경우</exception>
 		UniTask<Result<LinkResult>> LinkAsync(string platform, CancellationToken cancellationToken = default);
 
-		/// <summary>다른 계정에 연동된 플랫폼 계정을 이 계정으로 옮겨옵니다. 그 계정은 그 플랫폼으로 더 로그인할 수 없습니다.</summary>
+		/// <summary>
+		/// 다른 계정에 연동된 플랫폼 계정을 이 계정으로 옮겨옵니다. 그 계정은 그 플랫폼으로 더 로그인할 수 없습니다.
+		/// 연동 충돌로 받은 자격(<see cref="LinkResult.Credential"/>)은 안의 1회용 티켓을 보내며, 그 연동을 한 계정에서만 쓸 수 있습니다.
+		/// </summary>
 		UniTask<Result<IReadOnlyList<LinkedPlatform>>> TransferAsync(PlatformCredential credential, CancellationToken cancellationToken = default);
 
 		/// <summary>연동을 해제합니다. 마지막 로그인 수단은 <see cref="AccountResultCodes.LastLogin"/> 입니다.</summary>

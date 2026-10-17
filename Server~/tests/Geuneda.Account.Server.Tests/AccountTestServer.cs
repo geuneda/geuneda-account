@@ -52,7 +52,7 @@ namespace Geuneda.Account.Server.Tests
 			}, builder =>
 			{
 				services?.Invoke(builder.Services);
-				builder.AddGuest().AddPlatformVerifier<TestPlatformVerifier>().AddInMemoryStores();
+				builder.AddGuest().AddPlatformVerifier<TestPlatformVerifier>().AddPlatformVerifier<NonceTestPlatformVerifier>().AddInMemoryStores();
 			});
 
 			app.MapGeunedaAccount("/auth");
@@ -79,7 +79,7 @@ namespace Geuneda.Account.Server.Tests
 
 		public async Task<(int Status, T Body)> PostAsync<T>(string path, object body, string accessToken = null)
 		{
-			using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body, options: AccountJson.Options) };
+			using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = body == null ? null : JsonContent.Create(body, options: AccountJson.Options) };
 			return await SendAsync<T>(request, accessToken);
 		}
 
@@ -104,6 +104,30 @@ namespace Geuneda.Account.Server.Tests
 		public Task<(int Status, TokenResponse Body)> LoginTestAsync(string subject)
 		{
 			return PostAsync<TokenResponse>("login", new LoginRequest { Platform = TestPlatformVerifier.Name, Credential = TestPlatformVerifier.Credential(subject) });
+		}
+
+		/// <summary><c>POST nonce</c> 로 nonce 를 받습니다.</summary>
+		public async Task<string> IssueNonceAsync()
+		{
+			var (status, body) = await PostAsync<NonceResponse>("nonce", null);
+
+			if (status != 200 || string.IsNullOrEmpty(body?.Nonce))
+			{
+				throw new InvalidOperationException($"POST nonce failed with HTTP {status}");
+			}
+
+			return body.Nonce;
+		}
+
+		/// <summary>nonce 를 쓰는 시험용 플랫폼(<see cref="NonceTestPlatformVerifier"/>)으로 로그인합니다.</summary>
+		public Task<(int Status, T Body)> LoginNonceTestAsync<T>(string subject, string nonce, string boundNonce = null)
+		{
+			return PostAsync<T>("login", new LoginRequest
+			{
+				Platform = NonceTestPlatformVerifier.Name,
+				Credential = NonceTestPlatformVerifier.Credential(subject, boundNonce ?? nonce),
+				Nonce = nonce
+			});
 		}
 
 		public Task<(int Status, TokenResponse Body)> RefreshAsync(string refreshToken, string sessionId = null)

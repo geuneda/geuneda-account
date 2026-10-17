@@ -14,7 +14,9 @@ namespace Geuneda.Account.Server.Tests
 		{
 			public string Platform => AccountPlatforms.Guest;
 
-			public Task<PlatformVerification> VerifyAsync(string credential, System.Threading.CancellationToken cancellationToken)
+			public bool RequiresNonce => false;
+
+			public Task<PlatformVerification> VerifyAsync(string credential, string nonce, System.Threading.CancellationToken cancellationToken)
 			{
 				return Task.FromResult(PlatformVerification.Invalid("unused"));
 			}
@@ -38,6 +40,42 @@ namespace Geuneda.Account.Server.Tests
 		{
 			var exception = Assert.Throws<InvalidOperationException>(() => Map(ValidOptions, builder => builder.AddGuest()));
 			Assert.Contains("IAccountStore", exception.Message);
+		}
+
+		[Fact]
+		public void MissingOneTimeValueStore_Throws()
+		{
+			var exception = Assert.Throws<InvalidOperationException>(() => Map(ValidOptions, builder =>
+			{
+				builder.AddGuest();
+				builder.Services.AddSingleton<IAccountStore, InMemoryAccountStore>();
+				builder.Services.AddSingleton<IRefreshTokenStore, InMemoryRefreshTokenStore>();
+			}));
+			Assert.Contains("IOneTimeValueStore", exception.Message);
+		}
+
+		[Theory]
+		[InlineData(0)]
+		[InlineData(301)]
+		public void NonceLifetime_OutsideZeroToFiveMinutes_Throws(int seconds)
+		{
+			Assert.Throws<InvalidOperationException>(() => Map(options =>
+			{
+				ValidOptions(options);
+				options.NonceLifetime = TimeSpan.FromSeconds(seconds);
+			}, builder => builder.AddGuest().AddInMemoryStores()));
+		}
+
+		[Theory]
+		[InlineData(1)]
+		[InlineData(300)]
+		public void NonceLifetime_UpToFiveMinutes_IsAccepted(int seconds)
+		{
+			Map(options =>
+			{
+				ValidOptions(options);
+				options.NonceLifetime = TimeSpan.FromSeconds(seconds);
+			}, builder => builder.AddGuest().AddInMemoryStores());
 		}
 
 		[Fact]

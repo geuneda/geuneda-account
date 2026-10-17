@@ -36,6 +36,11 @@ namespace Geuneda.Account
 			_timeout = timeout;
 		}
 
+		public UniTask<AccountApiResult<NonceResponse>> IssueNonceAsync(CancellationToken cancellationToken)
+		{
+			return SendAsync<NonceResponse>(HttpRequest.Post(AccountRoutes.Nonce), true, cancellationToken);
+		}
+
 		public UniTask<AccountApiResult<TokenResponse>> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
 		{
 			return SendAsync<TokenResponse>(HttpRequest.Post(AccountRoutes.Login).WithJsonBody(request, JsonSettings), true, cancellationToken);

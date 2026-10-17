@@ -17,5 +17,12 @@ namespace Geuneda.Account
 		/// <summary><see cref="AccountResultCodes.LoginConflict"/> 일 때 그 플랫폼 계정이 연동된 계정의 ID 입니다.</summary>
 		[Preserve]
 		public string ConflictAccountId { get; set; }
+
+		/// <summary>
+		/// <see cref="AccountResultCodes.LoginConflict"/> 일 때 서버가 만든 1회용 티켓입니다(그 플랫폼 계정과 연동을 요청한 계정에 묶임, 기본 5분).
+		/// 플랫폼 로그인을 다시 하지 않고 그 계정으로 로그인하거나 요청한 계정으로 옮겨올 때 id 토큰 대신 보냅니다.
+		/// </summary>
+		[Preserve]
+		public string ConflictTicket { get; set; }
 	}
 }

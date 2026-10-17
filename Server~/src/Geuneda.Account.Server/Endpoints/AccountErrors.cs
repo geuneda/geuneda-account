@@ -40,13 +40,14 @@ namespace Geuneda.Account.Server
 			return Error(StatusCodes.Status404NotFound, AccountResultCodes.AccountNotFound, "Account not found");
 		}
 
-		public static IResult LoginConflict(string otherAccountId)
+		public static IResult LoginConflict(string otherAccountId, string conflictTicket)
 		{
 			return Results.Json(new ErrorResponse
 			{
 				Code = AccountResultCodes.LoginConflict,
 				Message = "The platform login is linked to another account",
-				ConflictAccountId = otherAccountId
+				ConflictAccountId = otherAccountId,
+				ConflictTicket = conflictTicket
 			}, AccountJson.Options, statusCode: StatusCodes.Status409Conflict);
 		}
 
@@ -55,9 +56,30 @@ namespace Geuneda.Account.Server
 			return Error(StatusCodes.Status409Conflict, AccountResultCodes.PlatformAlreadyLinked, $"The account already has a '{platform}' login");
 		}
 
-		public static IResult RetryLater()
+		public static IResult RetryLater(string message)
 		{
-			return Error(StatusCodes.Status503ServiceUnavailable, AccountResultCodes.RetryLater, "Concurrent refresh of the same login. Retry shortly");
+			return Error(StatusCodes.Status503ServiceUnavailable, AccountResultCodes.RetryLater, message);
+		}
+
+		public static IResult NonceMissing(string platform)
+		{
+			return Error(StatusCodes.Status400BadRequest, AccountResultCodes.NonceMissing, $"Platform '{platform}' needs a nonce from POST {AccountRoutes.Nonce}");
+		}
+
+		public static IResult NonceMismatch(string reason)
+		{
+			return Error(StatusCodes.Status401Unauthorized, AccountResultCodes.NonceMismatch, reason);
+		}
+
+		public static IResult InvalidNonce()
+		{
+			return Error(StatusCodes.Status401Unauthorized, AccountResultCodes.InvalidNonce, "Nonce was not issued, has expired or was already used");
+		}
+
+		public static IResult InvalidConflictTicket()
+		{
+			return Error(StatusCodes.Status401Unauthorized, AccountResultCodes.InvalidConflictTicket,
+				"Conflict ticket was not issued, has expired, was already used or belongs to another account");
 		}
 
 		public static IResult LastLogin()

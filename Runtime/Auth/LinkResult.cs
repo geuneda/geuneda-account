@@ -20,7 +20,11 @@ namespace Geuneda.Account
 		/// <summary>충돌일 때 그 플랫폼 계정이 연동된 계정의 ID 입니다.</summary>
 		public string ConflictAccountId { get; }
 
-		/// <summary>충돌일 때 다시 쓸 자격입니다. id 토큰은 수명이 짧으므로(수 분~1시간) 바로 씁니다.</summary>
+		/// <summary>
+		/// 충돌일 때 다시 쓸 자격입니다. 안에 서버가 준 1회용 충돌 티켓이 있어, 로그인·옮겨오기 요청은 id 토큰 대신 티켓을 보냅니다.
+		/// 티켓은 한 번만(충돌한 계정으로 로그인하거나 연동을 요청한 이 계정으로 옮겨오기 중 하나), 발급부터 5분(서버 <c>NonceLifetime</c>) 안에 씁니다.
+		/// 지났거나 이미 썼으면 <see cref="AccountResultCodes.InvalidConflictTicket"/> 이니 연동부터 다시 합니다.
+		/// </summary>
 		public PlatformCredential Credential { get; }
 
 		private LinkResult(IReadOnlyList<LinkedPlatform> links, string conflictAccountId, PlatformCredential credential)

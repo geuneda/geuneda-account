@@ -10,12 +10,14 @@ namespace Geuneda.Account.Server.Tests
 
 		public string Platform => Name;
 
+		public bool RequiresNonce => false;
+
 		public static string Credential(string subject)
 		{
 			return "ok:" + subject;
 		}
 
-		public Task<PlatformVerification> VerifyAsync(string credential, CancellationToken cancellationToken)
+		public Task<PlatformVerification> VerifyAsync(string credential, string nonce, CancellationToken cancellationToken)
 		{
 			return Task.FromResult(credential.StartsWith("ok:")
 				? PlatformVerification.Valid(credential.Substring(3))

@@ -6,13 +6,14 @@ namespace Geuneda.Account
 {
 	/// <summary>
 	/// 앱 세션입니다. 로그인하면 시작하고, 백그라운드에 오래 있다 돌아오면 새로 시작합니다. 기본 구현은 <see cref="AppSession"/> 이고,
-	/// services 의 <c>MainInstaller</c> 에 이 인터페이스로 바인딩합니다. 메인 스레드에서 씁니다.
+	/// services 의 <c>MainInstaller</c> 에 이 인터페이스로 바인딩하고 <c>MainInstaller.CleanDispose&lt;IAppSession&gt;()</c> 로 정리합니다
+	/// (<see cref="IDisposable.Dispose"/>: 앱 수명 연결을 끊음, 세션은 끝내지 않음). 메인 스레드에서 씁니다.
 	/// </summary>
 	/// <remarks>
 	/// 다음 세션 ID(<see cref="NextSessionId"/>)를 미리 만들어 두므로, 로그인 요청에 실어 보내면 서버 로그와 클라이언트 로그의 세션 ID 가 첫 요청부터 같습니다.
 	/// 이벤트는 대칭입니다. 새 세션이 시작되기 전에는 항상 이전 세션의 <see cref="Ended"/> 가 먼저 옵니다.
 	/// </remarks>
-	public interface IAppSession
+	public interface IAppSession : IDisposable
 	{
 		bool IsActive { get; }
 

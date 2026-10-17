@@ -31,6 +31,8 @@ namespace Geuneda.Account.Server
 			services.TryAddSingleton(TimeProvider.System);
 			services.TryAddSingleton<AccountTokenIssuer>();
 			services.TryAddSingleton<PlatformVerifierRegistry>();
+			services.TryAddScoped<PlatformCredentials>();
+			services.TryAddScoped<NonceEndpoints>();
 			services.TryAddScoped<TokenEndpoints>();
 			services.TryAddScoped<LinkEndpoints>();
 			services.TryAddSingleton<IAccessTokenValidator>(provider =>

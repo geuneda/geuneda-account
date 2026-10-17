@@ -4,6 +4,24 @@
 이 형식은 [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)를 기반으로 하며,
 이 프로젝트는 [Semantic Versioning](http://semver.org/spec/v2.0.0.html)을 따릅니다.
 
+## [0.3.0] - 2026-10-17
+
+**호환성 파괴 변경**(이전 동작이 필요한 프로젝트는 `0.2.0` 태그를 고정해 씁니다. 인증 서버, 클라이언트, 제공자 패키지 `com.geuneda.account.apple`·`google` 0.2.0 을 함께 올립니다):
+- `IAuthProvider` 에 `RequiresNonce` 를 더하고 `SignInAsync(CancellationToken)` 을 `SignInAsync(string nonce, CancellationToken)` 으로 바꿈. 직접 만든 제공자는 고쳐야 함
+- `IAuthService`·`IAppSession` 이 `IDisposable` 을 상속함. `MainInstaller.CleanDispose<IAuthService>()`·`CleanDispose<IAppSession>()` 로 정리할 수 있음. 직접 만든 구현·테스트 대역은 `Dispose` 를 구현해야 함
+- 서버 `IPlatformVerifier` 에 `RequiresNonce` 를 더하고 `VerifyAsync(credential, cancellationToken)` 을 `VerifyAsync(credential, nonce, cancellationToken)` 으로 바꿈. 직접 만든 검증기는 고쳐야 함
+- 서버에 `IOneTimeValueStore` 등록이 필요함(`AddInMemoryStores()` 는 `InMemoryOneTimeValueStore` 도 등록). 없으면 `MapGeunedaAccount` 가 예외
+- 애플·구글 로그인·연동·옮겨오기 요청에 nonce 가 없으면 서버가 거절(`NonceMissing`)하므로, account 0.2.x 클라이언트와 제공자 0.1.x 는 0.3.0 서버에 애플·구글로 로그인할 수 없음(게스트는 그대로)
+- 연동 충돌 뒤의 로그인·옮겨오기는 id 토큰 대신 409 응답의 1회용 충돌 티켓을 보냄. 0.2.x 클라이언트는 충돌 뒤 같은 id 토큰을 다시 보내므로 0.3.0 서버에서 애플·구글은 `InvalidNonce` 로 실패함
+
+**New**:
+- 애플·구글 id 토큰 replay 방어(서버 발급 nonce 챌린지): `POST nonce`(인증 없음) → `{nonce, expiresIn}`(1회용, `AccountServerOptions.NonceLifetime` 기본·최대 5분), 로그인·연동 요청의 `nonce` 필드. 서버는 id 토큰의 `nonce` 클레임(애플은 원문의 SHA-256 16진 소문자, 구글은 원문)을 확인한 뒤, 발급한 적 있고 만료되지 않았고 아직 쓰지 않은 nonce 만 받아 원자적으로 소비. 서명 검증을 통과한 뒤에 소비함
+- 연동 충돌 티켓: 연동이 충돌하면 409 응답에 서버가 만든 1회용 `conflictTicket`(플랫폼 계정과 연동을 요청한 계정에 묶임, `NonceLifetime` 동안)을 넣음. 로그인 요청은 티켓만으로, 옮겨오기는 티켓을 받은 계정의 요청만 받고, 둘 다 한 번만 받음. 티켓과 자격·nonce 를 함께 보내거나 연동(`POST links`)에 티켓을 보내면 400. 클라이언트 공개 API 는 그대로이고 `LinkResult.Credential` 안에 티켓이 들어 `SignInAsync(credential)`·`TransferAsync(credential)` 가 id 토큰 대신 보냄. 티켓이 없는 충돌 응답은 `InvalidResponse`
+- 결과 코드 `NonceMissing`(3012, 400), `NonceMismatch`(3013, 401), `InvalidNonce`(3014, 401, 발급하지 않았거나 만료되었거나 이미 씀), `InvalidConflictTicket`(3015, 401, 발급하지 않았거나 만료되었거나 이미 썼거나 다른 계정의 티켓). 1회용 값 저장소가 가득 차면 503 `RetryLater`
+- `AuthService` 는 nonce 를 쓰는 제공자로 로그인·연동하기 전에 nonce 를 받아 제공자에 넘기고 요청에 함께 보냄. 받지 못하면 플랫폼 로그인 화면 없이 그 결과(네트워크 실패, 5xx 등)로 끝남
+- 서버 1회용 값 저장소 `IOneTimeValueStore`(nonce 와 충돌 티켓을 용도 `OneTimeValueKind` 와 해시로 구분, 원자적 소비), `OneTimeValue`, `InMemoryOneTimeValueStore`(두 용도 합쳐 기록 상한 기본 10만, 만료 기록 정리, 소비한 기록도 상한의 두 배 넘게 붙잡지 않음, 가득 차면 새 값 거절), `PlatformVerification.NonceMismatch`/`IsNonceMismatch`
+- 샘플 서버의 시험용 `sample` 플랫폼도 nonce 를 씀(자격 `sample:<id>:<nonce>`)
+
 ## [0.2.0] - 2026-10-14
 
 **New**:

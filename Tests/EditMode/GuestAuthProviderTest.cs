@@ -37,8 +37,8 @@ namespace Geuneda.Account.Tests
 			var store = new FakeSecureStore();
 			var provider = new GuestAuthProvider(store, "guest");
 
-			var first = FakeAuthServer.Run(provider.SignInAsync(CancellationToken.None)).Value;
-			var second = FakeAuthServer.Run(new GuestAuthProvider(store, "guest").SignInAsync(CancellationToken.None)).Value;
+			var first = FakeAuthServer.Run(provider.SignInAsync(null, CancellationToken.None)).Value;
+			var second = FakeAuthServer.Run(new GuestAuthProvider(store, "guest").SignInAsync(null, CancellationToken.None)).Value;
 
 			Assert.AreEqual(AccountPlatforms.Guest, first.Platform);
 			Assert.AreEqual(43, first.Credential.Length);
@@ -53,7 +53,7 @@ namespace Geuneda.Account.Tests
 			var store = new FakeSecureStore { FailRead = true };
 			store.Values["guest"] = "existing";
 
-			var result = FakeAuthServer.Run(new GuestAuthProvider(store, "guest").SignInAsync(CancellationToken.None));
+			var result = FakeAuthServer.Run(new GuestAuthProvider(store, "guest").SignInAsync(null, CancellationToken.None));
 
 			Assert.AreEqual(AccountResultCodes.PlatformSignInFailed, result.Code);
 			Assert.AreEqual("existing", store.Values["guest"]);
@@ -64,7 +64,7 @@ namespace Geuneda.Account.Tests
 		{
 			var store = new FakeSecureStore { FailWrite = true };
 
-			var result = FakeAuthServer.Run(new GuestAuthProvider(store, "guest").SignInAsync(CancellationToken.None));
+			var result = FakeAuthServer.Run(new GuestAuthProvider(store, "guest").SignInAsync(null, CancellationToken.None));
 
 			Assert.AreEqual(AccountResultCodes.PlatformSignInFailed, result.Code);
 		}
@@ -75,7 +75,7 @@ namespace Geuneda.Account.Tests
 			var cancelled = new CancellationTokenSource();
 			cancelled.Cancel();
 
-			var result = FakeAuthServer.Run(new GuestAuthProvider(new FakeSecureStore(), "guest").SignInAsync(cancelled.Token));
+			var result = FakeAuthServer.Run(new GuestAuthProvider(new FakeSecureStore(), "guest").SignInAsync(null, cancelled.Token));
 
 			Assert.AreEqual(ResultCodes.Cancelled, result.Code);
 		}

@@ -15,7 +15,7 @@ namespace Geuneda.Account
 	/// 이전 세션을 <see cref="SessionEndReason.BackgroundTimeout"/> 으로 끝내고 새 세션을 시작합니다. 시계가 뒤로 가면 0 으로 봅니다.
 	/// 이벤트 처리기의 예외는 로그만 남기고 다음 처리기로 넘어갑니다.
 	/// </remarks>
-	public sealed class AppSession : IAppSession, IDisposable
+	public sealed class AppSession : IAppSession
 	{
 		public static readonly TimeSpan DefaultBackgroundTimeout = TimeSpan.FromMinutes(10);
 

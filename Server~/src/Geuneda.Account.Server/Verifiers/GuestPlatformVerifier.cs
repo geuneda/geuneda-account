@@ -19,7 +19,10 @@ namespace Geuneda.Account.Server
 
 		public string Platform => AccountPlatforms.Guest;
 
-		public Task<PlatformVerification> VerifyAsync(string credential, CancellationToken cancellationToken)
+		/// <summary>비밀 값은 기기 밖으로 나가지 않는 값이라 nonce 를 쓰지 않습니다.</summary>
+		public bool RequiresNonce => false;
+
+		public Task<PlatformVerification> VerifyAsync(string credential, string nonce, CancellationToken cancellationToken)
 		{
 			if (string.IsNullOrEmpty(credential) || !Base64Url.IsValid(credential, out var length) || length < MinSecretBytes || length > MaxSecretBytes)
 			{

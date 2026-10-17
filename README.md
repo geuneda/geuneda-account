@@ -10,7 +10,7 @@
 | 게임 서버 요청 | `AuthTokenMiddleware`(http 미들웨어) | `Geuneda.Account` |
 | 세션 | `IAppSession`, `AppSession`, `SessionInfo`, `SessionEndReason` | `Geuneda.Account` |
 | 코드 | `AccountResultCodes`(3000 블록) | `Geuneda.Account` |
-| 서버(.NET, `Server~/`) | `AddGeunedaAccount`, `MapGeunedaAccount`, `IAccountStore`, `IRefreshTokenStore`, `IPlatformVerifier`(`AddGuest`, `AddApple`, `AddGoogle`), `IAccessTokenValidator`, `AddGeunedaAccessTokenValidation` | `Geuneda.Account.Server` |
+| 서버(.NET, `Server~/`) | `AddGeunedaAccount`, `MapGeunedaAccount`, `IAccountStore`, `IRefreshTokenStore`, `IOneTimeValueStore`, `IPlatformVerifier`(`AddGuest`, `AddApple`, `AddGoogle`), `IAccessTokenValidator`, `AddGeunedaAccessTokenValidation` | `Geuneda.Account.Server` |
 
 ## 설치
 
@@ -53,6 +53,10 @@ var auth = new AuthService(options);
 MainInstaller.Bind<ISecureStore>(secureStore);
 MainInstaller.Bind<IAppSession>(session);
 MainInstaller.Bind<IAuthService>(auth);
+
+// 종료·재시작 정리: 두 인터페이스 모두 IDisposable 이다
+MainInstaller.CleanDispose<IAuthService>();
+MainInstaller.CleanDispose<IAppSession>();
 ```
 
 ### 로그인
@@ -73,6 +77,9 @@ if (result.IsSuccess && result.Value.IsNewAccount) { /* 튜토리얼 */ }
 // 다른 곳에서 로그인이 끝나면(만료·삭제·로그아웃) 타이틀로
 auth.SignedOut += reason => GoToTitle(reason);
 ```
+
+- 애플·구글처럼 nonce 를 쓰는 제공자(`IAuthProvider.RequiresNonce`)는 플랫폼 로그인 전에 인증 서버에서 일회용 nonce 를 받아(`POST nonce`) 제공자에 넘기고, 받은 id 토큰과 함께 서버로 보냅니다(id 토큰 replay 방어). nonce 를 받지 못하면 플랫폼 로그인 화면 없이 그 결과(네트워크 실패, 5xx 는 `HttpError`)로 끝납니다. 게스트는 nonce 를 쓰지 않습니다.
+- 제공자를 직접 만들면 `RequiresNonce` 를 서버 검증기와 같게 두고, true 면 `SignInAsync(nonce, ct)` 로 받은 원문에 id 토큰을 묶습니다(그 플랫폼 SDK 의 nonce 요청 값). 서버 검증기가 클레임과 비교하는 형식(원문 그대로 또는 해시)과 맞춥니다.
 
 ### 게임 서버 요청
 
@@ -109,6 +116,8 @@ if (link.IsSuccess && link.Value.IsConflict)
 }
 ```
 
+- 충돌 자격(`link.Value.Credential`) 안에는 서버가 준 1회용 충돌 티켓이 있어, `SignInAsync(credential)`·`TransferAsync(credential)` 는 id 토큰 대신 티켓을 보냅니다(id 토큰과 nonce 는 연동 요청에서 이미 씀). 티켓은 한 번만(그 계정으로 로그인 또는 이 계정으로 옮겨오기 중 하나), 발급부터 5분 안에 씁니다. 지났거나 이미 썼으면 `InvalidConflictTicket` 이니 연동부터 다시 합니다.
+
 - `UnlinkAsync(platform)` 은 마지막 로그인 수단이면 `LastLogin` 입니다. `DeleteAccountAsync()` 는 인증 서버의 계정을 지우고 로그아웃합니다. 게임 서버의 계정 데이터는 게임이 따로 지웁니다.
 - 게스트 비밀 값은 Android 에서 앱을 지우면 사라집니다. 게스트 계정이면 다른 플랫폼 연동을 권합니다.
 
@@ -120,6 +129,8 @@ if (link.IsSuccess && link.Value.IsConflict)
 | 연결 실패, 타임아웃, 취소 | `ResultCodes.NetworkError`, `Timeout`, `Cancelled` |
 | 다른 계정 작업 진행 중(로그인·로그아웃·연동·옮겨오기·해제·삭제) | `ResultCodes.InProgress` |
 | 서버 오류 응답(3001~3010) | `InvalidCredential`, `UnsupportedPlatform`, `InvalidRefreshToken`, `RefreshTokenReused`, `InvalidAccessToken`, `AccountNotFound`, `LoginConflict`, `PlatformAlreadyLinked`, `LastLogin`, `BadRequest`(`RetryLater` 3011 은 503 이라 클라이언트에서는 `HttpError`) |
+| nonce 거절(3012~3014) | `NonceMissing`(요청에 nonce 없음, 이전 클라이언트), `NonceMismatch`(id 토큰이 그 nonce 에 묶이지 않음), `InvalidNonce`(발급하지 않았거나 만료되었거나 이미 씀). 플랫폼 로그인부터 다시 합니다 |
+| 충돌 티켓 거절(3015) | `InvalidConflictTicket`(발급하지 않았거나 만료되었거나 이미 썼거나 다른 계정의 티켓). 연동부터 다시 합니다 |
 | 로그인 상태가 아님, 요청 중에 로그인이 바뀜(다른 계정 로그인·로그아웃) | `AccountResultCodes.NotSignedIn` |
 | 로그아웃은 됐지만 이 기기의 저장된 로그인을 지우지 못함, 저장소 오류로 다른 계정으로의 전환을 거절 | `AccountResultCodes.StorageFailed` |
 | access 토큰을 받는 동안 세션이 계속 바뀜(다시 시도) | `AccountResultCodes.SessionChanged` |
@@ -174,24 +185,27 @@ app.MapGeunedaAccount("/auth");   // 클라이언트 기본 주소는 https://..
 
 | 경로(접두사 아래) | 요청 | 응답 |
 |---|---|---|
-| `POST login` | `{platform, credential, sessionId?}` | `{accountId, accessToken, accessTokenExpiresIn, refreshToken, refreshTokenExpiresIn, isNewAccount}` |
+| `POST nonce` | 본문 없음, 인증 없음 | `{nonce, expiresIn}`(1회용, 기본 5분) |
+| `POST login` | `{platform, credential, nonce?, sessionId?}` 또는 `{platform, conflictTicket, sessionId?}` | `{accountId, accessToken, accessTokenExpiresIn, refreshToken, refreshTokenExpiresIn, isNewAccount}` |
 | `POST refresh` | `{refreshToken, sessionId?}` | 같음(쓴 refresh 토큰은 폐기) |
 | `POST logout` | `{refreshToken}` | 204(그 로그인에서 이어진 토큰 모두 폐기, 유효 여부는 알리지 않음) |
 | `GET links` | Bearer | `{links: [{platform, linkedAt}]}` |
-| `POST links` | Bearer, `{platform, credential}` | 연동 목록. 다른 계정 것이면 409 `LoginConflict` + `conflictAccountId` |
-| `POST links/transfer` | Bearer, `{platform, credential}` | 연동 목록(다른 계정에서 옮겨옴) |
+| `POST links` | Bearer, `{platform, credential, nonce?}` | 연동 목록. 다른 계정 것이면 409 `LoginConflict` + `conflictAccountId`, `conflictTicket` |
+| `POST links/transfer` | Bearer, `{platform, credential, nonce?}` 또는 `{platform, conflictTicket}` | 연동 목록(다른 계정에서 옮겨옴) |
 | `DELETE links/{platform}` | Bearer | 연동 목록. 마지막 수단이면 409 `LastLogin` |
 | `DELETE account` | Bearer | 204(계정과 refresh 토큰 삭제) |
 
-- 오류는 `{code, message, conflictAccountId?}` 와 HTTP 상태(400·401·404·409, 같은 로그인의 동시 재발급이 계속 겹치면 503 `RetryLater`)입니다. 요청 본문은 16KB 까지입니다.
+- 오류는 `{code, message, conflictAccountId?, conflictTicket?}` 와 HTTP 상태(400·401·404·409, 같은 로그인의 동시 재발급이 계속 겹치거나 1회용 값 저장소가 가득 차면 503 `RetryLater`)입니다. 요청 본문은 16KB 까지입니다.
 - **access 토큰**: JWT(`sub` 계정 ID, `sid` 세션 ID, `jti`, `iss`, `aud`, `exp`). 기본 수명 1시간. 게임 서버는 `AddGeunedaAccessTokenValidation(o => { o.Issuer, o.Audience, o.SigningKeys })` 로 `IAccessTokenValidator` 를 받아 검증합니다(실시간 RPC 로그인에서는 계약 구현이 검증 후 `IRpcContext.SignIn(accountId)`). 토큰 자체만 검증하므로 탈퇴한 계정의 토큰도 만료 전까지 통과합니다.
 - **refresh 토큰**: 32바이트 무작위 값이고 서버는 SHA-256 만 저장합니다. 쓸 때마다 새 토큰으로 바뀌고 수명(기본 30일)도 새로 셉니다. 로그인 하나에서 쓸 수 있는 토큰은 언제나 하나(현재 토큰)입니다. 바로 직전 토큰이 `RefreshReuseGrace`(기본 30초, 처음 교체 시각부터) 안에 다시 오면 응답을 잃은 재시도로 보고 현재 토큰을 새 토큰으로 바꿔 줍니다. 그 밖에 지나간 토큰이 오면(유예 뒤 직전 토큰, 두 번 이상 전 토큰, 재시도로 밀려난 토큰) 탈취로 보고 그 로그인을 폐기합니다(`RefreshTokenReused`).
-- **검증기**: `IPlatformVerifier`(플랫폼 이름, 자격 → 플랫폼 안의 고유 ID). 게스트(`AddGuest`)는 Base64url 32~64바이트 비밀 값의 SHA-256 을 고유 ID 로 씁니다.
-- **애플·구글**: `AddApple(o => o.Audiences.Add("com.company.game"))`(iOS 번들 ID), `AddGoogle(o => { o.ClientIds.Add(웹 클라이언트 ID); o.ClientIds.Add(iOS 클라이언트 ID); })`. 자격은 id 토큰(JWT)이고 발급자 공개 키(OIDC JWKS)로 서명, 발급자, 대상, 만료(기본 시계 오차 5분)를 검사해 `sub` 를 고유 ID 로 씁니다. 공개 키(`OpenIdConnectKeyCache`)는 처음 검증할 때 받아 두고 12시간마다 갱신합니다(실패하면 받아 둔 키를 계속 쓰고 5분 뒤 다시 시도). 모르는 키로 서명된 토큰이 오면 다시 받기를 기다려 한 번 더 확인하므로 발급자의 키 교체 직후에도 첫 요청이 통과합니다. 위조 토큰으로 발급자를 두드리지 않게 다시 받기는 5분에 한 번입니다. 서명 키가 없는 응답은 받기 실패로 보고, 처음 받기가 실패하면 30초 동안은 다시 받지 않고 바로 500 입니다. 공개 키를 확인하지 못하면 500(클라이언트에서는 `HttpError`, 로그인 유지)입니다. 클라이언트 제공자는 [com.geuneda.account.apple](https://github.com/geuneda/geuneda-account-apple), [com.geuneda.account.google](https://github.com/geuneda/geuneda-account-google) 입니다.
-- **저장소**: `IAccountStore`(로그인 수단의 고유성, 플랫폼당 하나, 마지막 수단 보호를 원자적으로), `IRefreshTokenStore`(로그인별 `RefreshTokenFamily` 의 현재·직전 토큰과 토큰 기록 `RefreshTokenRecord`. 회전 `TryRotateAsync` 는 현재 토큰을 비교한 뒤 상태 교체와 새 토큰 기록 추가를 한 번에). 메모리 구현(`AddInMemoryStores`)은 샘플·테스트용입니다. 저장소는 scoped 로 등록해도 됩니다.
+- **검증기**: `IPlatformVerifier`(플랫폼 이름, `RequiresNonce`, 자격·nonce → 플랫폼 안의 고유 ID). 게스트(`AddGuest`)는 Base64url 32~64바이트 비밀 값의 SHA-256 을 고유 ID 로 쓰고 nonce 를 쓰지 않습니다. 자격이 nonce 에 묶이지 않았으면 `PlatformVerification.NonceMismatch` 를 돌려줍니다.
+- **nonce(id 토큰 replay 방어)**: 애플·구글 검증기는 `RequiresNonce` 입니다. 클라이언트가 로그인·연동 전에 `POST nonce` 로 받은 원문(Base64url 43자)을 제공자가 id 토큰에 묶고(애플은 원문의 SHA-256 16진 소문자를 요청에, 구글은 원문 그대로. 두 발급자 모두 요청 값을 `nonce` 클레임에 그대로 넣음), 요청의 `nonce` 로 원문을 보냅니다. 서버는 요청에 nonce 가 없으면 400 `NonceMissing`, 클레임이 없거나 다르면 401 `NonceMismatch`, 서명·클레임 검증을 통과한 뒤 저장소에서 원자적으로 소비해 발급한 적 없거나 만료되었거나(`NonceLifetime`, 기본·최대 5분) 이미 썼으면 401 `InvalidNonce` 입니다. 로그인·연동·옮겨오기가 모두 같은 검사를 거칩니다.
+- **연동 충돌 티켓**: 연동이 충돌하면(409 `LoginConflict`) id 토큰과 nonce 는 이미 썼으므로, 서버가 무작위 1회용 `conflictTicket` 을 만들어 응답에 넣습니다. 티켓은 그 플랫폼 계정(플랫폼, 고유 ID)과 연동을 요청한 계정에 묶이고 `NonceLifetime` 동안 한 번만 씁니다. 로그인(`{platform, conflictTicket}`)은 티켓만으로 받고(티켓은 인증된 연동 요청의 응답으로만 나감), 옮겨오기는 티켓을 받은 계정의 요청만 받습니다(다른 계정이 보내면 401 `InvalidConflictTicket` 이고 티켓은 소비됨). 티켓과 자격·nonce 를 함께 보내거나 `POST links` 에 티켓을 보내면 400 입니다.
+- **애플·구글**: `AddApple(o => o.Audiences.Add("com.company.game"))`(iOS 번들 ID), `AddGoogle(o => { o.ClientIds.Add(웹 클라이언트 ID); o.ClientIds.Add(iOS 클라이언트 ID); })`. 자격은 id 토큰(JWT)이고 발급자 공개 키(OIDC JWKS)로 서명, 발급자, 대상, 만료(기본 시계 오차 5분), `nonce` 클레임을 검사해 `sub` 를 고유 ID 로 씁니다. 공개 키(`OpenIdConnectKeyCache`)는 처음 검증할 때 받아 두고 12시간마다 갱신합니다(실패하면 받아 둔 키를 계속 쓰고 5분 뒤 다시 시도). 모르는 키로 서명된 토큰이 오면 다시 받기를 기다려 한 번 더 확인하므로 발급자의 키 교체 직후에도 첫 요청이 통과합니다. 위조 토큰으로 발급자를 두드리지 않게 다시 받기는 5분에 한 번입니다. 서명 키가 없는 응답은 받기 실패로 보고, 처음 받기가 실패하면 30초 동안은 다시 받지 않고 바로 500 입니다. 공개 키를 확인하지 못하면 500(클라이언트에서는 `HttpError`, 로그인 유지)입니다. 클라이언트 제공자는 [com.geuneda.account.apple](https://github.com/geuneda/geuneda-account-apple), [com.geuneda.account.google](https://github.com/geuneda/geuneda-account-google) 입니다.
+- **저장소**: `IAccountStore`(로그인 수단의 고유성, 플랫폼당 하나, 마지막 수단 보호를 원자적으로), `IRefreshTokenStore`(로그인별 `RefreshTokenFamily` 의 현재·직전 토큰과 토큰 기록 `RefreshTokenRecord`. 회전 `TryRotateAsync` 는 현재 토큰을 비교한 뒤 상태 교체와 새 토큰 기록 추가를 한 번에), `IOneTimeValueStore`(nonce 와 충돌 티켓을 용도 `OneTimeValueKind` 와 원문의 SHA-256 으로 구분해 `OneTimeValue` 로 저장. `TryConsumeAsync` 는 원자적 삭제, 데이터베이스는 조건부 삭제·Redis 는 `GETDEL`. 서버가 여러 대면 공유 저장소). 메모리 구현(`AddInMemoryStores`)은 샘플·테스트용이고, `InMemoryOneTimeValueStore` 는 서버 한 대에서 쓸 수 있게 두 용도 합쳐 기록 수 상한(기본 10만)과 만료 정리를 두고(소비한 기록도 상한의 두 배 넘게 붙잡지 않음) 가득 차면 새 값을 거절합니다(503). 저장소는 scoped 로 등록해도 됩니다.
 - 시작할 때(`MapGeunedaAccount`) 설정(키로 서명 가능한지 포함), 저장소 등록, 검증기 이름 중복을 검사해 잘못되면 예외입니다.
-- 요청 횟수 제한은 하지 않습니다. 운영에서는 ASP.NET Core rate limiter 를 이 그룹에 붙입니다. 로그에는 토큰·자격 원문을 남기지 않습니다.
-- 샘플: `dotnet run --project "Server~/samples/Geuneda.Account.SampleServer" --no-launch-profile -- --urls http://127.0.0.1:5299`(메모리 저장소, 게스트, 시험용 `sample` 플랫폼, 보호된 `GET /game/me` 예시, 시작할 때마다 새 서명 키).
+- 요청 횟수 제한은 하지 않습니다. `POST nonce` 는 인증 없이 부르므로 운영에서는 ASP.NET Core rate limiter 를 이 그룹에 꼭 붙입니다. 로그에는 토큰·자격·nonce 원문을 남기지 않습니다.
+- 샘플: `dotnet run --project "Server~/samples/Geuneda.Account.SampleServer" --no-launch-profile -- --urls http://127.0.0.1:5299`(메모리 저장소, 게스트, 시험용 `sample` 플랫폼(자격 `sample:<id>:<nonce>`, nonce 흐름 시험용), 보호된 `GET /game/me` 예시, 시작할 때마다 새 서명 키).
 
 ## 요구 사항
 

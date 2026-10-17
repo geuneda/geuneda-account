@@ -4,6 +4,7 @@ namespace Geuneda.Account.Server
 {
 	/// <summary>
 	/// Sign in with Apple 검증기입니다. 자격은 애플 id 토큰(identityToken)이고, 대상(<c>aud</c>)은 앱 번들 ID(웹 로그인이면 Services ID)입니다.
+	/// 클라이언트는 nonce 원문의 SHA-256 16진 소문자를 애플 요청에 넣고(원문이 앱 밖으로 나가지 않게) 원문을 서버에 보내므로, <c>nonce</c> 클레임은 그 해시입니다.
 	/// <see cref="AccountServerBuilder.AddApple"/> 로 등록합니다.
 	/// </summary>
 	public sealed class AppleIdTokenVerifier : OpenIdConnectPlatformVerifier
@@ -20,5 +21,11 @@ namespace Geuneda.Account.Server
 		}
 
 		public override string Platform => AccountPlatforms.Apple;
+
+		/// <summary>nonce 원문의 SHA-256(UTF-8) 16진 소문자입니다.</summary>
+		protected override string NonceClaimOf(string nonce)
+		{
+			return OneTimeValues.Hash(nonce);
+		}
 	}
 }

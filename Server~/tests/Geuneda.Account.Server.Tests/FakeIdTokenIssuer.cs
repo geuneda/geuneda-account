@@ -63,13 +63,22 @@ namespace Geuneda.Account.Server.Tests
 			return new OpenIdConnectKeyCache(MetadataAddress, this, time);
 		}
 
-		public string CreateToken(string issuer, string audience, string subject, DateTimeOffset issuedAt, TimeSpan lifetime, SecurityKey signingKey = null)
+		/// <param name="nonce">있으면 <c>nonce</c> 클레임으로 넣습니다(발급자는 요청에 넣은 값을 그대로 넣음).</param>
+		public string CreateToken(string issuer, string audience, string subject, DateTimeOffset issuedAt, TimeSpan lifetime, SecurityKey signingKey = null,
+			string nonce = null)
 		{
+			var claims = new Dictionary<string, object> { [JwtRegisteredClaimNames.Sub] = subject };
+
+			if (nonce != null)
+			{
+				claims[JwtRegisteredClaimNames.Nonce] = nonce;
+			}
+
 			return new JsonWebTokenHandler { SetDefaultTimesOnTokenCreation = false }.CreateToken(new SecurityTokenDescriptor
 			{
 				Issuer = issuer,
 				Audience = audience,
-				Claims = new Dictionary<string, object> { [JwtRegisteredClaimNames.Sub] = subject },
+				Claims = claims,
 				IssuedAt = issuedAt.UtcDateTime,
 				NotBefore = issuedAt.UtcDateTime,
 				Expires = (issuedAt + lifetime).UtcDateTime,

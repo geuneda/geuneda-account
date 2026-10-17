@@ -10,16 +10,16 @@ namespace Geuneda.Account.Server
 	/// <summary>연동 목록·연동·옮겨오기·해제와 계정 삭제입니다. access 토큰이 필요합니다(<see cref="AccessTokenFilter"/>).</summary>
 	internal sealed class LinkEndpoints
 	{
-		private readonly PlatformVerifierRegistry _verifiers;
+		private readonly PlatformCredentials _credentials;
 		private readonly IAccountStore _accounts;
 		private readonly IRefreshTokenStore _refreshTokens;
 		private readonly TimeProvider _time;
 		private readonly ILogger<LinkEndpoints> _logger;
 
-		public LinkEndpoints(PlatformVerifierRegistry verifiers, IAccountStore accounts, IRefreshTokenStore refreshTokens, TimeProvider time,
+		public LinkEndpoints(PlatformCredentials credentials, IAccountStore accounts, IRefreshTokenStore refreshTokens, TimeProvider time,
 			ILogger<LinkEndpoints> logger)
 		{
-			_verifiers = verifiers;
+			_credentials = credentials;
 			_accounts = accounts;
 			_refreshTokens = refreshTokens;
 			_time = time;
@@ -83,30 +83,27 @@ namespace Geuneda.Account.Server
 			var cancellationToken = context.RequestAborted;
 			var request = await RequestBody.ReadAsync<LinkRequest>(context.Request, cancellationToken);
 
-			if (request == null || !RequestFields.IsPlatform(request.Platform) || !RequestFields.IsCredential(request.Credential))
+			// 충돌 티켓은 옮겨오기에서만 받는다(연동을 다시 하면 또 충돌일 뿐이다)
+			if (request == null || !RequestFields.IsPlatform(request.Platform) ||
+				!RequestFields.IsCredentialOrTicket(request.Credential, request.Nonce, request.ConflictTicket) || (!transfer && request.ConflictTicket != null))
 			{
-				return AccountErrors.BadRequest("Link needs platform and credential");
-			}
-
-			var verifier = _verifiers.Find(request.Platform);
-
-			if (verifier == null)
-			{
-				return AccountErrors.UnsupportedPlatform(request.Platform);
-			}
-
-			var verification = await verifier.VerifyAsync(request.Credential, cancellationToken);
-
-			if (!verification.IsValid)
-			{
-				return AccountErrors.InvalidCredential(verification.FailureReason);
+				return AccountErrors.BadRequest("Link needs platform and a credential with an optional nonce. Transfer also takes a conflict ticket instead");
 			}
 
 			var accountId = AccessTokenFilter.AccountId(context);
+			var check = request.ConflictTicket != null
+				? await _credentials.RedeemConflictTicketAsync(request.Platform, request.ConflictTicket, accountId, cancellationToken)
+				: await _credentials.VerifyAsync(request.Platform, request.Credential, request.Nonce, cancellationToken);
+
+			if (check.Error != null)
+			{
+				return check.Error;
+			}
+
 			var now = _time.GetUtcNow();
 			var outcome = transfer
-				? await _accounts.TransferAsync(accountId, request.Platform, verification.Subject, now, cancellationToken)
-				: await _accounts.LinkAsync(accountId, request.Platform, verification.Subject, now, cancellationToken);
+				? await _accounts.TransferAsync(accountId, request.Platform, check.Subject, now, cancellationToken)
+				: await _accounts.LinkAsync(accountId, request.Platform, check.Subject, now, cancellationToken);
 
 			switch (outcome.Status)
 			{
@@ -115,7 +112,16 @@ namespace Geuneda.Account.Server
 				case LinkStatus.PlatformAlreadyLinked:
 					return AccountErrors.PlatformAlreadyLinked(request.Platform);
 				case LinkStatus.LinkedToOtherAccount:
-					return AccountErrors.LoginConflict(outcome.OtherAccountId);
+					// id 토큰(과 nonce)은 이미 썼다. 플랫폼 로그인을 다시 하지 않고 그 계정으로 로그인하거나 이 계정으로 옮겨올 수 있게 1회용 티켓을 준다
+					var ticket = await _credentials.IssueConflictTicketAsync(request.Platform, check.Subject, accountId, cancellationToken);
+
+					if (ticket == null)
+					{
+						_logger.LogWarning("The one-time value store is full. A conflict ticket for {Platform} could not be issued", request.Platform);
+						return AccountErrors.RetryLater("Too many pending one-time values. Retry shortly");
+					}
+
+					return AccountErrors.LoginConflict(outcome.OtherAccountId, ticket);
 				default:
 					if (transfer)
 					{

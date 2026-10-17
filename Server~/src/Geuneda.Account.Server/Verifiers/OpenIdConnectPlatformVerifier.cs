@@ -10,13 +10,15 @@ using Microsoft.IdentityModel.Tokens;
 namespace Geuneda.Account.Server
 {
 	/// <summary>
-	/// OpenID Connect id 토큰(JWT)을 자격으로 받는 플랫폼 검증기의 공통 구현입니다. 서명은 발급자의 공개 키(JWKS)로, 발급자·대상·만료를 확인하고
-	/// <c>sub</c> 를 고유 ID 로 씁니다. 공개 키는 <see cref="OpenIdConnectKeyCache"/> 가 받아 두고 주기적으로 갱신하며,
+	/// OpenID Connect id 토큰(JWT)을 자격으로 받는 플랫폼 검증기의 공통 구현입니다. 서명은 발급자의 공개 키(JWKS)로, 발급자·대상·만료와
+	/// <c>nonce</c> 클레임(<see cref="NonceClaimOf"/>)을 확인하고 <c>sub</c> 를 고유 ID 로 씁니다. 공개 키는 <see cref="OpenIdConnectKeyCache"/> 가 받아 두고 주기적으로 갱신하며,
 	/// 모르는 키로 서명된 토큰이 오면(발급자의 키 교체) 다시 받기를 기다려 한 번 더 확인합니다.
 	/// </summary>
 	/// <remarks>공개 키를 확인하지 못하면(발급자 장애, 네트워크) 예외가 나 요청은 500 입니다. 자격 오류가 아니므로 클라이언트가 로그인을 지우지 않습니다.</remarks>
 	public abstract class OpenIdConnectPlatformVerifier : IPlatformVerifier
 	{
+		private const string NonceClaim = "nonce";
+
 		private readonly JsonWebTokenHandler _handler = new JsonWebTokenHandler();
 		private readonly OpenIdConnectKeyCache _keys;
 		private readonly string[] _issuers;
@@ -43,7 +45,10 @@ namespace Geuneda.Account.Server
 
 		public abstract string Platform { get; }
 
-		public async Task<PlatformVerification> VerifyAsync(string credential, CancellationToken cancellationToken)
+		/// <summary>id 토큰은 서버가 발급한 nonce 에 묶여 있어야 합니다(replay 방어).</summary>
+		public bool RequiresNonce => true;
+
+		public async Task<PlatformVerification> VerifyAsync(string credential, string nonce, CancellationToken cancellationToken)
 		{
 			if (string.IsNullOrEmpty(credential))
 			{
@@ -69,7 +74,22 @@ namespace Geuneda.Account.Server
 				return PlatformVerification.Invalid($"{Platform} id token rejected ({result.Exception?.GetType().Name ?? "no subject"})");
 			}
 
+			if (string.IsNullOrEmpty(nonce) || !token.TryGetPayloadValue<string>(NonceClaim, out var claim) ||
+				!string.Equals(claim, NonceClaimOf(nonce), StringComparison.Ordinal))
+			{
+				return PlatformVerification.NonceMismatch($"{Platform} id token is not bound to the nonce");
+			}
+
 			return PlatformVerification.Valid(token.Subject);
+		}
+
+		/// <summary>
+		/// id 토큰의 <c>nonce</c> 클레임에 들어 있어야 할 값입니다. 발급자는 로그인 요청에 넣은 값을 그대로 클레임에 넣으므로, 클라이언트가 nonce 를 어떻게 넣는지에 따릅니다.
+		/// 기본은 원문 그대로(구글)입니다.
+		/// </summary>
+		protected virtual string NonceClaimOf(string nonce)
+		{
+			return nonce;
 		}
 
 		private Task<TokenValidationResult> ValidateAsync(string credential, OpenIdConnectConfiguration configuration)

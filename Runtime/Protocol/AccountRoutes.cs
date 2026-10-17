@@ -7,6 +7,8 @@ namespace Geuneda.Account
 	/// </summary>
 	internal static class AccountRoutes
 	{
+		/// <summary>POST(본문 없음) → <see cref="NonceResponse"/>. 애플·구글 로그인·연동 전에 받는 일회용 nonce. 인증 없이 부릅니다</summary>
+		public const string Nonce = "nonce";
 		/// <summary>POST <see cref="LoginRequest"/> → <see cref="TokenResponse"/></summary>
 		public const string Login = "login";
 		/// <summary>POST <see cref="RefreshRequest"/> → <see cref="TokenResponse"/></summary>

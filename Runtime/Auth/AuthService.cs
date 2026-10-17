@@ -23,7 +23,7 @@ namespace Geuneda.Account
 	/// <see cref="Dispose"/> 하면 진행 중인 요청을 취소하고, 늦게 끝난 결과도 적용하지 않습니다. 이벤트 처리기의 예외는 로그만 남깁니다.
 	/// </para>
 	/// </remarks>
-	public sealed class AuthService : IAuthService, IDisposable
+	public sealed class AuthService : IAuthService
 	{
 		private static readonly ModuleLogger Logger = new ModuleLogger("Geuneda.Account");
 
@@ -201,7 +201,7 @@ namespace Geuneda.Account
 			{
 				using (var linked = LinkLifetime(cancellationToken))
 				{
-					var credential = await provider.SignInAsync(linked.Token);
+					var credential = await ProviderSignIn.SignInAsync(_api, provider, linked.Token);
 
 					if (_disposed)
 					{
@@ -392,7 +392,7 @@ namespace Geuneda.Account
 				using (var linked = LinkLifetime(cancellationToken))
 				{
 					var token = linked.Token;
-					var credential = await provider.SignInAsync(token);
+					var credential = await ProviderSignIn.SignInAsync(_api, provider, token);
 
 					if (_disposed)
 					{
@@ -404,19 +404,26 @@ namespace Geuneda.Account
 						return Result<LinkResult>.Fail(credential.Code, credential.Message);
 					}
 
-					var request = new LinkRequest { Platform = value.Platform, Credential = value.Credential };
+					var request = new LinkRequest { Platform = value.Platform, Credential = value.Credential, Nonce = value.Nonce };
 					var result = await CallAuthorizedAsync(accessToken => _api.LinkAsync(accessToken, request, false, token), token);
 
-					if (result.Result.Code == AccountResultCodes.LoginConflict && !string.IsNullOrEmpty(result.Error?.ConflictAccountId))
+					var conflict = result.Result.Code == AccountResultCodes.LoginConflict;
+
+					// id 토큰(과 nonce)은 이 요청에서 썼다. 이어서 로그인·옮겨오기는 서버가 준 1회용 티켓으로 한다
+					if (conflict && !string.IsNullOrEmpty(result.Error?.ConflictAccountId) && !string.IsNullOrEmpty(result.Error.ConflictTicket))
 					{
-						return Result<LinkResult>.Ok(LinkResult.Conflict(result.Error.ConflictAccountId, value));
+						return Result<LinkResult>.Ok(LinkResult.Conflict(result.Error.ConflictAccountId, value.WithConflictTicket(result.Error.ConflictTicket)));
 					}
 
 					if (!result.Result.TryGetValue(out var links))
 					{
 						// 다음 시도에서 플랫폼 계정을 다시 고를 수 있게 SDK 에서 로그아웃한다
 						await SignOutProvidersAsync(new[] { provider }, token);
-						return Result<LinkResult>.Fail(result.Result.Code, result.Result.Message);
+
+						// 계정 ID 나 티켓이 없는 충돌 응답은 이어서 쓸 수 없다
+						return conflict
+							? Result<LinkResult>.Fail(AccountResultCodes.InvalidResponse, "Conflict response is missing the account id or the conflict ticket")
+							: Result<LinkResult>.Fail(result.Result.Code, result.Result.Message);
 					}
 
 					return Result<LinkResult>.Ok(LinkResult.Linked(ToLinkList(links)));
@@ -445,7 +452,9 @@ namespace Geuneda.Account
 				using (var linked = LinkLifetime(cancellationToken))
 				{
 					var token = linked.Token;
-					var request = new LinkRequest { Platform = credential.Platform, Credential = credential.Credential };
+					var request = credential.ConflictTicket != null
+						? new LinkRequest { Platform = credential.Platform, ConflictTicket = credential.ConflictTicket }
+						: new LinkRequest { Platform = credential.Platform, Credential = credential.Credential, Nonce = credential.Nonce };
 					var result = await CallAuthorizedAsync(accessToken => _api.LinkAsync(accessToken, request, true, token), token);
 					return ToLinks(result);
 				}
@@ -528,12 +537,10 @@ namespace Geuneda.Account
 		private async UniTask<Result<SignInResult>> SignInCoreAsync(PlatformCredential credential, CancellationToken cancellationToken)
 		{
 			var sessionId = _session.NextSessionId;
-			var request = new LoginRequest
-			{
-				Platform = credential.Platform,
-				Credential = credential.Credential,
-				SessionId = sessionId
-			};
+			// 연동 충돌로 받은 자격이면 id 토큰 대신 티켓을 보낸다
+			var request = credential.ConflictTicket != null
+				? new LoginRequest { Platform = credential.Platform, ConflictTicket = credential.ConflictTicket, SessionId = sessionId }
+				: new LoginRequest { Platform = credential.Platform, Credential = credential.Credential, Nonce = credential.Nonce, SessionId = sessionId };
 			var response = await _api.LoginAsync(request, cancellationToken);
 
 			if (_disposed)

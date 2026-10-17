@@ -13,18 +13,18 @@ namespace Geuneda.Account.Server
 		private const int MaxRotateAttempts = 3;
 
 		private readonly AccountServerOptions _options;
-		private readonly PlatformVerifierRegistry _verifiers;
+		private readonly PlatformCredentials _credentials;
 		private readonly IAccountStore _accounts;
 		private readonly IRefreshTokenStore _refreshTokens;
 		private readonly AccountTokenIssuer _issuer;
 		private readonly TimeProvider _time;
 		private readonly ILogger<TokenEndpoints> _logger;
 
-		public TokenEndpoints(IOptions<AccountServerOptions> options, PlatformVerifierRegistry verifiers, IAccountStore accounts,
+		public TokenEndpoints(IOptions<AccountServerOptions> options, PlatformCredentials credentials, IAccountStore accounts,
 			IRefreshTokenStore refreshTokens, AccountTokenIssuer issuer, TimeProvider time, ILogger<TokenEndpoints> logger)
 		{
 			_options = options.Value;
-			_verifiers = verifiers;
+			_credentials = credentials;
 			_accounts = accounts;
 			_refreshTokens = refreshTokens;
 			_issuer = issuer;
@@ -37,29 +37,29 @@ namespace Geuneda.Account.Server
 			var cancellationToken = context.RequestAborted;
 			var request = await RequestBody.ReadAsync<LoginRequest>(context.Request, cancellationToken);
 
-			if (request == null || !RequestFields.IsPlatform(request.Platform) || !RequestFields.IsCredential(request.Credential) ||
-				!RequestFields.IsOptionalSessionId(request.SessionId))
+			if (request == null || !RequestFields.IsPlatform(request.Platform) ||
+				!RequestFields.IsCredentialOrTicket(request.Credential, request.Nonce, request.ConflictTicket) || !RequestFields.IsOptionalSessionId(request.SessionId))
 			{
-				return AccountErrors.BadRequest("Login needs platform, credential and an optional session id");
+				return AccountErrors.BadRequest("Login needs platform, either a credential with an optional nonce or a conflict ticket, and an optional session id");
 			}
 
-			var verifier = _verifiers.Find(request.Platform);
+			// 충돌 티켓은 인증된 연동 요청의 응답으로만 나가므로 로그인은 티켓만으로 받는다
+			var check = request.ConflictTicket != null
+				? await _credentials.RedeemConflictTicketAsync(request.Platform, request.ConflictTicket, null, cancellationToken)
+				: await _credentials.VerifyAsync(request.Platform, request.Credential, request.Nonce, cancellationToken);
 
-			if (verifier == null)
+			if (check.Error != null)
 			{
-				return AccountErrors.UnsupportedPlatform(request.Platform);
-			}
+				if (check.FailureReason != null)
+				{
+					_logger.LogInformation("Login rejected for platform {Platform}: {Reason}", request.Platform, check.FailureReason);
+				}
 
-			var verification = await verifier.VerifyAsync(request.Credential, cancellationToken);
-
-			if (!verification.IsValid)
-			{
-				_logger.LogInformation("Login rejected for platform {Platform}: {Reason}", request.Platform, verification.FailureReason);
-				return AccountErrors.InvalidCredential(verification.FailureReason);
+				return check.Error;
 			}
 
 			var now = _time.GetUtcNow();
-			var account = await _accounts.FindOrCreateAsync(request.Platform, verification.Subject, now, cancellationToken);
+			var account = await _accounts.FindOrCreateAsync(request.Platform, check.Subject, now, cancellationToken);
 			var tokens = _issuer.Issue(account.AccountId, request.SessionId, RefreshTokens.NewFamilyId(), now);
 			var family = new RefreshTokenFamily
 			{
@@ -134,7 +134,7 @@ namespace Geuneda.Account.Server
 			}
 
 			// 경쟁에 계속 졌을 뿐 토큰은 유효할 수 있다. 클라이언트가 로그인을 지우지 않게 일시적 실패로 돌려준다
-			return AccountErrors.RetryLater();
+			return AccountErrors.RetryLater("Concurrent refresh of the same login. Retry shortly");
 		}
 
 		public async Task<IResult> LogoutAsync(HttpContext context)

@@ -2,10 +2,10 @@
   "name": "com.geuneda.account",
   "displayName": "Geuneda Account",
   "author": "geuneda",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "unity": "2021.3",
   "license": "MIT",
-  "description": "계정 인증과 앱 세션입니다. 플랫폼 제공자(게스트 기본, 애플·구글은 별도 패키지 com.geuneda.account.apple·google)로 로그인, refresh 토큰은 보안 저장소에 두고 access 토큰은 메모리(재발급 single-flight, 남은 수명 기준), 게임 서버 요청에 토큰을 넣고 401 이면 재발급 후 한 번 다시 보내는 HTTP 미들웨어, 연동·충돌·옮겨오기·해제·계정 삭제, 다음 세션 ID 예약과 대칭 세션 이벤트. 같은 프로토콜을 쓰는 ASP.NET Core 인증 서버(Server~, 게스트·애플·구글 id 토큰 검증기)를 함께 둡니다.",
+  "description": "계정 인증과 앱 세션입니다. 플랫폼 제공자(게스트 기본, 애플·구글은 별도 패키지 com.geuneda.account.apple·google)로 로그인, refresh 토큰은 보안 저장소에 두고 access 토큰은 메모리(재발급 single-flight, 남은 수명 기준), 게임 서버 요청에 토큰을 넣고 401 이면 재발급 후 한 번 다시 보내는 HTTP 미들웨어, 연동·충돌·옮겨오기·해제·계정 삭제, 다음 세션 ID 예약과 대칭 세션 이벤트. 같은 프로토콜을 쓰는 ASP.NET Core 인증 서버(Server~, 게스트·애플·구글 id 토큰 검증기, 서버 발급 nonce 로 id 토큰 replay 방어)를 함께 둡니다.",
   "type": "library",
   "hideInEditor": false,
   "dependencies": {

@@ -26,16 +26,18 @@ namespace Geuneda.Account.Tests
 	{
 		private const string UrlVariable = "GEUNEDA_ACCOUNT_INTEROP_URL";
 
-		/// <summary>샘플 서버의 시험용 플랫폼(<c>sample:&lt;id&gt;</c> 를 그대로 믿음)입니다.</summary>
+		/// <summary>샘플 서버의 시험용 플랫폼(<c>sample:&lt;id&gt;:&lt;nonce&gt;</c> 를 그대로 믿고, 끝의 nonce 가 요청의 nonce 와 같아야 함)입니다.</summary>
 		private sealed class SampleProvider : IAuthProvider
 		{
 			public string Subject;
 
 			public string Platform => "sample";
 
-			public UniTask<Result<PlatformCredential>> SignInAsync(CancellationToken cancellationToken)
+			public bool RequiresNonce => true;
+
+			public UniTask<Result<PlatformCredential>> SignInAsync(string nonce, CancellationToken cancellationToken)
 			{
-				return UniTask.FromResult(Result<PlatformCredential>.Ok(new PlatformCredential(Platform, "sample:" + Subject)));
+				return UniTask.FromResult(Result<PlatformCredential>.Ok(new PlatformCredential(Platform, "sample:" + Subject + ":" + nonce)));
 			}
 
 			public UniTask SignOutAsync(CancellationToken cancellationToken)
@@ -106,13 +108,14 @@ namespace Geuneda.Account.Tests
 			Assert.AreEqual(signedIn.Value.AccountId, silent.Value.AccountId);
 			Assert.AreEqual(restartedSession.SessionId, (string) meAgain.Value["sessionId"]);
 
-			// 연동, 다른 계정과의 충돌, 옮겨오기
+			// 연동(서버 발급 nonce), 다른 계정과의 충돌, 충돌 티켓으로 옮겨오기, 티켓을 다시 쓰면 거절
 			var linked = await restarted.LinkAsync("sample");
 			var otherStore = new FakeSecureStore();
 			var other = CreateService(url, otherStore, NewSession(), new SampleProvider { Subject = sample.Subject });
 			var otherSignedIn = await other.SignInAsync(AccountPlatforms.Guest);
 			var conflict = await other.LinkAsync("sample");
 			var transferred = await other.TransferAsync(conflict.Value.Credential);
+			var replayed = await other.TransferAsync(conflict.Value.Credential);
 			var sampleLogin = await CreateService(url, new FakeSecureStore(), NewSession(), sample).SignInAsync("sample");
 
 			Assert.IsTrue(linked.IsSuccess, linked.ToString());
@@ -120,7 +123,9 @@ namespace Geuneda.Account.Tests
 			Assert.AreEqual(new[] { "guest", "sample" }, linked.Value.Links.Select(link => link.Platform));
 			Assert.IsTrue(conflict.Value.IsConflict);
 			Assert.AreEqual(signedIn.Value.AccountId, conflict.Value.ConflictAccountId);
+			Assert.IsFalse(string.IsNullOrEmpty(conflict.Value.Credential.ConflictTicket));
 			Assert.IsTrue(transferred.IsSuccess, transferred.ToString());
+			Assert.AreEqual(AccountResultCodes.InvalidConflictTicket, replayed.Code, replayed.ToString());
 			Assert.AreEqual(otherSignedIn.Value.AccountId, sampleLogin.Value.AccountId);
 
 			// 해제: 마지막 로그인 수단은 거절

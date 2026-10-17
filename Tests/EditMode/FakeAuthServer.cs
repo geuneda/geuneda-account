@@ -15,6 +15,7 @@ namespace Geuneda.Account.Tests
 {
 	/// <summary>
 	/// 인증 서버 프로토콜을 흉내 내는 HTTP 전송입니다. 자격 <c>bad</c> 는 검증 실패이고, 그 밖의 자격은 그대로 고유 ID 로 씁니다.
+	/// 요청에 nonce 가 있으면 발급한 nonce 인지 보고 소비합니다. 연동 충돌이면 1회용 티켓을 주고, 로그인·옮겨오기에서 티켓을 한 번 받습니다(옮겨오기는 받은 계정만).
 	/// 게이트가 없으면 모든 요청이 동기적으로 끝납니다.
 	/// </summary>
 	internal sealed class FakeAuthServer : IHttpTransport
@@ -28,6 +29,11 @@ namespace Geuneda.Account.Tests
 		public readonly Dictionary<string, string> AccessTokens = new Dictionary<string, string>();
 		public readonly List<string> LoggedOut = new List<string>();
 		public readonly List<string> SessionIds = new List<string>();
+		public readonly HashSet<string> IssuedNonces = new HashSet<string>();
+		/// <summary>로그인·연동·옮겨오기 요청에 실려 온 nonce(없으면 null)</summary>
+		public readonly List<string> ReceivedNonces = new List<string>();
+		/// <summary>쓰지 않은 충돌 티켓 → (로그인 수단 키, 티켓을 받은 계정)</summary>
+		public readonly Dictionary<string, (string Key, string AccountId)> Tickets = new Dictionary<string, (string, string)>();
 
 		public int AccessTokenExpiresIn = 3600;
 
@@ -76,6 +82,10 @@ namespace Geuneda.Account.Tests
 
 			switch (route)
 			{
+				case "nonce":
+					var nonce = "nonce-" + ++_next;
+					IssuedNonces.Add(nonce);
+					return Respond(request, 200, new NonceResponse { Nonce = nonce, ExpiresIn = 300 });
 				case "login":
 					return Login(request, Body<LoginRequest>(request));
 				case "refresh":
@@ -154,8 +164,24 @@ namespace Geuneda.Account.Tests
 				return Error(request, 401, AccountResultCodes.InvalidCredential);
 			}
 
-			SessionIds.Add(body.SessionId);
+			if (!ConsumeNonce(body.Nonce))
+			{
+				return Error(request, 401, AccountResultCodes.InvalidNonce);
+			}
+
 			var key = body.Platform + "|" + body.Credential;
+
+			if (body.ConflictTicket != null)
+			{
+				if (body.Credential != null || !Tickets.Remove(body.ConflictTicket, out var ticket))
+				{
+					return Error(request, 401, AccountResultCodes.InvalidConflictTicket);
+				}
+
+				key = ticket.Key;
+			}
+
+			SessionIds.Add(body.SessionId);
 			var created = !Owners.TryGetValue(key, out var accountId);
 
 			if (created)
@@ -187,11 +213,31 @@ namespace Geuneda.Account.Tests
 				return Error(request, 401, AccountResultCodes.InvalidCredential);
 			}
 
+			if (!ConsumeNonce(body.Nonce))
+			{
+				return Error(request, 401, AccountResultCodes.InvalidNonce);
+			}
+
 			var key = body.Platform + "|" + body.Credential;
+
+			if (body.ConflictTicket != null)
+			{
+				if (!transfer || body.Credential != null || !Tickets.Remove(body.ConflictTicket, out var ticket) || ticket.AccountId != accountId)
+				{
+					return Error(request, 401, AccountResultCodes.InvalidConflictTicket);
+				}
+
+				key = ticket.Key;
+			}
 
 			if (Owners.TryGetValue(key, out var owner) && owner != accountId && !transfer)
 			{
-				return Respond(request, 409, new ErrorResponse { Code = AccountResultCodes.LoginConflict, Message = "conflict", ConflictAccountId = owner });
+				var conflictTicket = "ticket-" + ++_next;
+				Tickets[conflictTicket] = (key, accountId);
+				return Respond(request, 409, new ErrorResponse
+				{
+					Code = AccountResultCodes.LoginConflict, Message = "conflict", ConflictAccountId = owner, ConflictTicket = conflictTicket
+				});
 			}
 
 			if (owner != accountId && links.Any(link => link.StartsWith(body.Platform + "|")))
@@ -211,6 +257,12 @@ namespace Geuneda.Account.Tests
 			}
 
 			return LinksResponse(request, links);
+		}
+
+		private bool ConsumeNonce(string nonce)
+		{
+			ReceivedNonces.Add(nonce);
+			return nonce == null || IssuedNonces.Remove(nonce);
 		}
 
 		private TokenResponse Issue(string accountId, bool created)

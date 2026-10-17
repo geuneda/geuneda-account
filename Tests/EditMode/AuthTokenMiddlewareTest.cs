@@ -58,6 +58,10 @@ namespace Geuneda.Account.Tests
 			public UniTask<Result<IReadOnlyList<LinkedPlatform>>> TransferAsync(PlatformCredential credential, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 			public UniTask<Result<IReadOnlyList<LinkedPlatform>>> UnlinkAsync(string platform, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 			public UniTask<Result> DeleteAccountAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+			public void Dispose()
+			{
+			}
 		}
 
 		private sealed class RecordingTransport : IHttpTransport

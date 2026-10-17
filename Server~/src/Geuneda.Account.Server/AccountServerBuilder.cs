@@ -83,6 +83,7 @@ namespace Geuneda.Account.Server
 		{
 			Services.TryAddSingleton<IAccountStore, InMemoryAccountStore>();
 			Services.TryAddSingleton<IRefreshTokenStore, InMemoryRefreshTokenStore>();
+			Services.TryAddSingleton<IOneTimeValueStore, InMemoryOneTimeValueStore>();
 			return this;
 		}
 

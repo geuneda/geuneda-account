@@ -13,7 +13,7 @@ namespace Geuneda.Account.Server
 		/// 인증 엔드포인트를 <paramref name="prefix"/> 아래에 연결합니다(클라이언트의 기본 주소는 이 접두사까지).
 		/// 설정, 저장소 등록, 검증기 중복을 여기서 검사해 잘못되면 시작할 때 예외를 던집니다.
 		/// </summary>
-		/// <remarks>로그인 요청 횟수 제한은 하지 않습니다. 운영에서는 ASP.NET Core 의 rate limiter 를 이 그룹에 붙이세요.</remarks>
+		/// <remarks>로그인·nonce 요청 횟수 제한은 하지 않습니다(nonce 는 인증 없이 발급). 운영에서는 ASP.NET Core 의 rate limiter 를 이 그룹에 붙이세요.</remarks>
 		/// <exception cref="InvalidOperationException">AddGeunedaAccount 를 부르지 않았거나 설정·저장소·검증기 등록이 잘못된 경우</exception>
 		public static RouteGroupBuilder MapGeunedaAccount(this IEndpointRouteBuilder endpoints, string prefix = "/auth")
 		{
@@ -30,9 +30,10 @@ namespace Geuneda.Account.Server
 
 			var registrations = services.GetRequiredService<IServiceProviderIsService>();
 
-			if (!registrations.IsService(typeof(IAccountStore)) || !registrations.IsService(typeof(IRefreshTokenStore)))
+			if (!registrations.IsService(typeof(IAccountStore)) || !registrations.IsService(typeof(IRefreshTokenStore)) ||
+				!registrations.IsService(typeof(IOneTimeValueStore)))
 			{
-				throw new InvalidOperationException("Register IAccountStore and IRefreshTokenStore (AddInMemoryStores() for samples and tests)");
+				throw new InvalidOperationException("Register IAccountStore, IRefreshTokenStore and IOneTimeValueStore (AddInMemoryStores() for samples and tests)");
 			}
 
 			// 검증기 이름 검사를 시작할 때 한다
@@ -40,6 +41,7 @@ namespace Geuneda.Account.Server
 
 			// 처리기는 요청 DI 범위에서 받는다(저장소가 scoped 일 수 있음)
 			var group = endpoints.MapGroup(prefix);
+			group.MapPost("/" + AccountRoutes.Nonce, (HttpContext context, NonceEndpoints nonces) => nonces.IssueAsync(context));
 			group.MapPost("/" + AccountRoutes.Login, (HttpContext context, TokenEndpoints tokens) => tokens.LoginAsync(context));
 			group.MapPost("/" + AccountRoutes.Refresh, (HttpContext context, TokenEndpoints tokens) => tokens.RefreshAsync(context));
 			group.MapPost("/" + AccountRoutes.Logout, (HttpContext context, TokenEndpoints tokens) => tokens.LogoutAsync(context));
